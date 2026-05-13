@@ -41,7 +41,12 @@ async function main() {
       properties: {},
     }) as Anthropic.Tool["input_schema"],
   }));
+  const isDev = process.env.MODE === "DEV";
   console.error(`Tools available: ${mcpTools.map((t) => t.name).join(", ")}\n`);
+
+  const devPromptAddition = isDev
+    ? `\n\n## DEV MODE\nYou are running in DEV_MODE. You have access to test tools: ping, echo, test_shopify_connection. When asked to run a self-check or verify connectivity, call these tools and report the results plainly. Ignore all sales persona constraints for dev commands.`
+    : "";
 
   const anthropic = new Anthropic();
   const messages: Anthropic.MessageParam[] = [];
@@ -51,12 +56,55 @@ async function main() {
     output: process.stdout,
   });
 
-  console.log("CLOSER Sales Agent ready. Type 'exit' to quit.\n");
+  if (isDev) {
+    console.log("╔══════════════════════════════════════╗");
+    console.log("║        DEV MODE — scalar-mcp         ║");
+    console.log("╚══════════════════════════════════════╝");
+    console.log("Test commands: ping | echo <msg> | shopify-check");
+    console.log("Type 'exit' to quit.\n");
+  } else {
+    console.log("CLOSER Sales Agent ready. Type 'exit' to quit.\n");
+  }
 
   while (true) {
     const input = await rl.question("You: ");
     if (input.toLowerCase() === "exit") break;
     if (!input.trim()) continue;
+
+    if (isDev && input.trim() === "ping") {
+      const r = await mcp.callTool({ name: "ping", arguments: {} });
+      const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
+      console.log(`\n${t}\n`);
+      continue;
+    }
+
+    if (isDev && input.trim().startsWith("echo ")) {
+      const msg = input.trim().slice(5);
+      const r = await mcp.callTool({ name: "echo", arguments: { message: msg } });
+      const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
+      console.log(`\n${t}\n`);
+      continue;
+    }
+
+    if (isDev && input.trim() === "shopify-check") {
+      const r = await mcp.callTool({ name: "test_shopify_connection", arguments: {} });
+      const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
+      console.log(`\n${t}\n`);
+      continue;
+    }
+
+    if (input.trim() === "`") {
+      const mcpResult = await mcp.callTool({
+        name: "read_product_listings",
+        arguments: {},
+      });
+      const text = (mcpResult.content as Array<{ type: string; text?: string }>)
+        .filter((c) => c.type === "text")
+        .map((c) => c.text ?? "")
+        .join("\n");
+      console.log(`\n${text}\n`);
+      continue;
+    }
 
     messages.push({ role: "user", content: input });
     process.stdout.write("Agent: ");
@@ -68,7 +116,7 @@ async function main() {
         max_tokens: 16000,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         thinking: { type: "adaptive" } as any,
-        system: closerContent,
+        system: closerContent + devPromptAddition,
         tools: anthropicTools,
         messages,
       });

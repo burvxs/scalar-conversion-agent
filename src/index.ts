@@ -159,6 +159,92 @@ server.registerTool(
   }
 );
 
+// --- Dev Tools ---
+
+if (process.env.MODE === "DEV") {
+  server.registerTool(
+    "ping",
+    {
+      title: "Ping",
+      description:
+        "DEV: Health check. Returns 'pong' with a timestamp to confirm MCP tool calls are working.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [{ type: "text", text: `pong | ${new Date().toISOString()}` }],
+    })
+  );
+
+  server.registerTool(
+    "echo",
+    {
+      title: "Echo",
+      description:
+        "DEV: Returns the message you send. Verifies argument passing through the MCP layer.",
+      inputSchema: z.object({
+        message: z.string().describe("Any string to echo back"),
+      }),
+    },
+    async ({ message }) => ({
+      content: [{ type: "text", text: message }],
+    })
+  );
+
+  server.registerTool(
+    "test_shopify_connection",
+    {
+      title: "Test Shopify Connection",
+      description:
+        "DEV: Hits the Shopify shop endpoint and returns the shop name and currency. Verifies API credentials are valid.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const token = process.env.SHOPIFY_ACCESS_TOKEN;
+      const domain = process.env.SHOPIFY_STORE_DOMAIN;
+
+      if (!token || !domain) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Missing SHOPIFY_ACCESS_TOKEN or SHOPIFY_STORE_DOMAIN.",
+            },
+          ],
+        };
+      }
+
+      const res = await fetch(
+        `https://${domain}/admin/api/2025-01/shop.json`,
+        { headers: { "X-Shopify-Access-Token": token } }
+      );
+
+      if (!res.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Shopify API error: ${res.status} ${res.statusText}`,
+            },
+          ],
+        };
+      }
+
+      const { shop } = (await res.json()) as {
+        shop: { name: string; currency: string; domain: string };
+      };
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `OK | shop:${shop.name} | currency:${shop.currency} | domain:${shop.domain}`,
+          },
+        ],
+      };
+    }
+  );
+}
+
 // --- Start ---
 
 async function main() {
