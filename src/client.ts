@@ -8,10 +8,15 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = resolve(__dirname, "../dist/index.js");
 
-async function fetchCloserFramework(): Promise<string> {
+async function main() {
+  console.error("Connecting to MCP server...");
+
   const transport = new StdioClientTransport({
     command: "node",
     args: [SERVER_PATH],
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(([, v]) => v !== undefined)
+    ) as Record<string, string>,
   });
 
   const mcp = new Client(
@@ -21,17 +26,22 @@ async function fetchCloserFramework(): Promise<string> {
 
   await mcp.connect(transport);
 
-  const result = await mcp.readResource({ uri: "closer://framework" });
-  await mcp.close();
+  const resourceResult = await mcp.readResource({ uri: "closer://framework" });
+  const resourceContent = resourceResult.contents[0];
+  const closerContent =
+    "text" in resourceContent ? (resourceContent.text as string) : "";
+  console.error("CLOSER framework loaded.");
 
-  const content = result.contents[0];
-  return "text" in content ? (content.text as string) : "";
-}
-
-async function main() {
-  console.error("Connecting to MCP server...");
-  const closerContent = await fetchCloserFramework();
-  console.error("CLOSER framework loaded.\n");
+  const { tools: mcpTools } = await mcp.listTools();
+  const anthropicTools: Anthropic.Tool[] = mcpTools.map((t) => ({
+    name: t.name,
+    description: t.description ?? "",
+    input_schema: (t.inputSchema ?? {
+      type: "object",
+      properties: {},
+    }) as Anthropic.Tool["input_schema"],
+  }));
+  console.error(`Tools available: ${mcpTools.map((t) => t.name).join(", ")}\n`);
 
   const anthropic = new Anthropic();
   const messages: Anthropic.MessageParam[] = [];
@@ -49,34 +59,70 @@ async function main() {
     if (!input.trim()) continue;
 
     messages.push({ role: "user", content: input });
-
-    const stream = anthropic.messages.stream({
-      model: "claude-opus-4-7",
-      max_tokens: 16000,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      thinking: { type: "adaptive" } as any,
-      system: closerContent,
-      messages,
-    });
-
     process.stdout.write("Agent: ");
-    let reply = "";
 
-    for await (const event of stream) {
-      if (
-        event.type === "content_block_delta" &&
-        event.delta.type === "text_delta"
-      ) {
-        process.stdout.write(event.delta.text);
-        reply += event.delta.text;
+    let continueLoop = true;
+    while (continueLoop) {
+      const stream = anthropic.messages.stream({
+        model: "claude-opus-4-7",
+        max_tokens: 16000,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        thinking: { type: "adaptive" } as any,
+        system: closerContent,
+        tools: anthropicTools,
+        messages,
+      });
+
+      for await (const event of stream) {
+        if (
+          event.type === "content_block_delta" &&
+          event.delta.type === "text_delta"
+        ) {
+          process.stdout.write(event.delta.text);
+        }
       }
+
+      const response = await stream.finalMessage();
+      messages.push({ role: "assistant", content: response.content });
+
+      if (response.stop_reason !== "tool_use") {
+        continueLoop = false;
+        break;
+      }
+
+      const toolUseBlocks = response.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolUse of toolUseBlocks) {
+        const mcpResult = await mcp.callTool({
+          name: toolUse.name,
+          arguments: toolUse.input as Record<string, unknown>,
+        });
+
+        const resultText = (
+          mcpResult.content as Array<{ type: string; text?: string }>
+        )
+          .filter((c) => c.type === "text")
+          .map((c) => c.text ?? "")
+          .join("\n");
+
+        toolResults.push({
+          type: "tool_result",
+          tool_use_id: toolUse.id,
+          content: resultText,
+        });
+      }
+
+      messages.push({ role: "user", content: toolResults });
     }
 
     console.log("\n");
-    messages.push({ role: "assistant", content: reply });
   }
 
   rl.close();
+  await mcp.close();
 }
 
 main().catch((err) => {
