@@ -86,7 +86,7 @@ server.registerTool(
         title: string;
         body_html: string;
         status: string;
-        variants: Array<{ price: string; inventory_quantity: number }>;
+        variants: Array<{ id: number; price: string; inventory_quantity: number }>;
       }>;
     };
 
@@ -100,19 +100,61 @@ server.registerTool(
 
     const formatted = listings
       .map((p) => {
-        const price = p.variants[0]?.price ?? "N/A";
-        const available = (p.variants[0]?.inventory_quantity ?? 0) > 0 ? "In stock" : "Out of stock";
+        const variant = p.variants[0];
+        const price = variant?.price ?? "N/A";
+        const available = (variant?.inventory_quantity ?? 0) > 0 ? "In stock" : "Out of stock";
+        const variantId = variant?.id ?? "N/A";
         const description = p.body_html
           .replace(/<[^>]+>/g, " ")
           .replace(/\s+/g, " ")
           .trim()
           .slice(0, 200);
-        return `**${p.title}** — £${price} | ${available}\n${description}`;
+        return `**${p.title}** — £${price} | ${available} | variant:${variantId}\n${description}`;
       })
       .join("\n\n");
 
     return {
       content: [{ type: "text", text: formatted }],
+    };
+  }
+);
+
+server.registerTool(
+  "create_checkout_link",
+  {
+    title: "Create Checkout Link",
+    description:
+      "Generate a Shopify cart URL for a product variant. Returns a direct checkout link to send to the customer.",
+    inputSchema: z.object({
+      variant_id: z
+        .number()
+        .describe("Shopify variant ID from read_product_listings"),
+      quantity: z.number().optional().describe("Quantity (default 1)"),
+      discount_code: z
+        .string()
+        .optional()
+        .describe("Discount code to pre-apply"),
+    }),
+  },
+  async ({ variant_id, quantity = 1, discount_code }) => {
+    const domain = process.env.SHOPIFY_STORE_DOMAIN;
+
+    if (!domain) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "Missing SHOPIFY_STORE_DOMAIN environment variable.",
+          },
+        ],
+      };
+    }
+
+    let url = `https://${domain}/cart/${variant_id}:${quantity}`;
+    if (discount_code) url += `?discount=${encodeURIComponent(discount_code)}`;
+
+    return {
+      content: [{ type: "text", text: url }],
     };
   }
 );
