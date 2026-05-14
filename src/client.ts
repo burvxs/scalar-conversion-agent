@@ -60,7 +60,7 @@ async function main() {
     console.log("╔══════════════════════════════════════╗");
     console.log("║        DEV MODE — scalar-mcp         ║");
     console.log("╚══════════════════════════════════════╝");
-    console.log("Test commands: ping | echo <msg> | shopify-check");
+    console.log("Test commands: ping | echo <msg> | shopify-check | rpl");
     console.log("Type 'exit' to quit.\n");
   } else {
     console.log("CLOSER Sales Agent ready. Type 'exit' to quit.\n");
@@ -70,6 +70,13 @@ async function main() {
     const input = await rl.question("You: ");
     if (input.toLowerCase() === "exit") break;
     if (!input.trim()) continue;
+
+    if (isDev && input.trim() === "rpl") {
+      const r = await mcp.callTool({ name: "read_product_listings", arguments: {} });
+      const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
+      console.log(`\n${t}\n`);
+      continue;
+    }
 
     if (isDev && input.trim() === "ping") {
       const r = await mcp.callTool({ name: "ping", arguments: {} });
@@ -88,6 +95,22 @@ async function main() {
 
     if (isDev && input.trim() === "shopify-check") {
       const r = await mcp.callTool({ name: "test_shopify_connection", arguments: {} });
+      const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
+      console.log(`\n${t}\n`);
+      continue;
+    }
+
+    if (input.trim().startsWith("clg ") || input.trim() === "clg") {
+      const parts = input.trim().split(" ");
+      const variantId = Number(parts[1]);
+      const discountCode = parts[2];
+      if (!variantId) {
+        console.log("\nUsage: clg <variant_id> [discount_code]\n");
+        continue;
+      }
+      const args: Record<string, unknown> = { variant_id: variantId, quantity: 1 };
+      if (discountCode) args.discount_code = discountCode;
+      const r = await mcp.callTool({ name: "create_checkout_link", arguments: args });
       const t = (r.content as Array<{ type: string; text?: string }>).find((c) => c.type === "text")?.text ?? "";
       console.log(`\n${t}\n`);
       continue;

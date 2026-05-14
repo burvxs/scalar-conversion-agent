@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "dev": "concurrently \"tsc --watch\" \"nodemon --watch dist --ext js --exec 'node --env-file=.env dist/client.js'\"",
     "start": "node dist/index.js",
     "client": "node dist/client.js"
   },
@@ -16,6 +16,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14",
     "typescript": "^5.0.0"
   }
 }
