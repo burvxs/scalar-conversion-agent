@@ -4,9 +4,39 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import * as readline from "node:readline/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ClientInstance } from "./types/client-instance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = resolve(__dirname, "../dist/index.js");
+
+function buildSystemPrompt(closer: string, instance: ClientInstance): string {
+  const { persona, max_discount_percentage, offers, discount_code_prefix, dynamic_cart_context } = instance;
+
+  const activeOffers = Object.entries(offers)
+    .map(([key, o]) => `  - ${key}: ${o.code} (${o.percentage}% off) — ${o.description ?? ""}`)
+    .join("\n");
+
+  const personaBlock = `## AGENT PERSONALITY CONTEXT
+You are ${persona.name}, ${persona.role}.
+${persona.background}
+
+Tone: ${persona.tone}
+
+Words you use: ${persona.vocabulary_preferred.join(", ")}.
+Words you refuse: ${persona.vocabulary_forbidden.join(", ")}.`;
+
+  const instanceBlock = `## CLIENT INSTANCE CONFIG
+- Max discount allowed: ${max_discount_percentage}%
+- Discount code prefix: ${discount_code_prefix}
+- Active offers:
+${activeOffers}`;
+
+  const cartBlock = `## CURRENT CUSTOMER CONTEXT
+Cart: ${JSON.stringify(dynamic_cart_context.current_cart)}
+Customer profile: ${JSON.stringify(dynamic_cart_context.customer_profile)}`;
+
+  return [closer, personaBlock, instanceBlock, cartBlock].join("\n\n");
+}
 
 async function main() {
   console.error("Connecting to MCP server...");
@@ -26,11 +56,22 @@ async function main() {
 
   await mcp.connect(transport);
 
-  const resourceResult = await mcp.readResource({ uri: "closer://framework" });
-  const resourceContent = resourceResult.contents[0];
+  const closerResult = await mcp.readResource({ uri: "closer://framework" });
   const closerContent =
-    "text" in resourceContent ? (resourceContent.text as string) : "";
-  console.error("CLOSER framework loaded.");
+    "text" in closerResult.contents[0] ? (closerResult.contents[0].text as string) : "";
+
+  const instanceResult = await mcp.readResource({ uri: "client://instance" });
+  const instanceRaw =
+    "text" in instanceResult.contents[0] ? (instanceResult.contents[0].text as string) : "{}";
+  const instance = JSON.parse(instanceRaw) as ClientInstance;
+
+  if (instance.billing_status === "suspended") {
+    console.error(`Client ${instance.client_id} is suspended. Exiting.`);
+    await mcp.close();
+    process.exit(1);
+  }
+
+  console.error(`Client: ${instance.client_id} | Status: ${instance.billing_status}`);
 
   const { tools: mcpTools } = await mcp.listTools();
   const anthropicTools: Anthropic.Tool[] = mcpTools.map((t) => ({
@@ -41,11 +82,12 @@ async function main() {
       properties: {},
     }) as Anthropic.Tool["input_schema"],
   }));
+
   const isDev = process.env.MODE === "DEV";
   console.error(`Tools available: ${mcpTools.map((t) => t.name).join(", ")}\n`);
 
   const devPromptAddition = isDev
-    ? `\n\n## DEV MODE\nYou are running in DEV_MODE. You have access to test tools: ping, echo, test_shopify_connection. When asked to run a self-check or verify connectivity, call these tools and report the results plainly. Ignore all sales persona constraints for dev commands.`
+    ? `\n\n## DEV MODE\nYou are running in DEV_MODE. You have access to test tools: ping, echo, test_shopify_connection, get_client_instance. When asked to run a self-check or verify connectivity, call these tools and report the results plainly. Ignore all sales persona constraints for dev commands.`
     : "";
 
   const anthropic = new Anthropic();
@@ -60,7 +102,7 @@ async function main() {
     console.log("╔══════════════════════════════════════╗");
     console.log("║        DEV MODE — scalar-mcp         ║");
     console.log("╚══════════════════════════════════════╝");
-    console.log("Test commands: ping | echo <msg> | shopify-check | rpl");
+    console.log("Test commands: ping | echo <msg> | shopify-check | rpl | clg <id> [code]");
     console.log("Type 'exit' to quit.\n");
   } else {
     console.log("CLOSER Sales Agent ready. Type 'exit' to quit.\n");
@@ -132,6 +174,8 @@ async function main() {
     messages.push({ role: "user", content: input });
     process.stdout.write("Agent: ");
 
+    const systemPrompt = buildSystemPrompt(closerContent, instance) + devPromptAddition;
+
     let continueLoop = true;
     while (continueLoop) {
       const stream = anthropic.messages.stream({
@@ -139,7 +183,7 @@ async function main() {
         max_tokens: 16000,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         thinking: { type: "adaptive" } as any,
-        system: closerContent + devPromptAddition,
+        system: systemPrompt,
         tools: anthropicTools,
         messages,
       });

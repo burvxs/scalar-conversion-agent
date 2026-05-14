@@ -4,9 +4,13 @@ import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
+import { loadClient } from "./lib/load-client.js";
+import type { ClientInstance } from "./types/client-instance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLOSER_PATH = resolve(__dirname, "../CLOSER.md");
+
+const instance: ClientInstance = await loadClient();
 
 const server = new McpServer({
   name: "scalar-mcp",
@@ -20,7 +24,7 @@ server.registerResource(
   "closer://framework",
   {
     title: "CLOSER Sales Framework",
-    description: "Sales principles and guidance based on the CLOSER framework",
+    description: "Sales framework, SOPs, and guardrails",
     mimeType: "text/markdown",
   },
   async (uri) => ({
@@ -29,6 +33,25 @@ server.registerResource(
         uri: uri.href,
         mimeType: "text/markdown",
         text: await readFile(CLOSER_PATH, "utf-8"),
+      },
+    ],
+  })
+);
+
+server.registerResource(
+  "instance",
+  "client://instance",
+  {
+    title: "Client Instance",
+    description: "Current client configuration including persona, offers, and dynamic cart context",
+    mimeType: "application/json",
+  },
+  async (uri) => ({
+    contents: [
+      {
+        uri: uri.href,
+        mimeType: "application/json",
+        text: JSON.stringify(instance, null, 2),
       },
     ],
   })
@@ -50,19 +73,8 @@ server.registerTool(
     }),
   },
   async ({ limit = 10 }) => {
-    const token = process.env.SHOPIFY_ACCESS_TOKEN;
-    const domain = process.env.SHOPIFY_STORE_DOMAIN;
-
-    if (!token || !domain) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Missing SHOPIFY_ACCESS_TOKEN or SHOPIFY_STORE_DOMAIN environment variables.",
-          },
-        ],
-      };
-    }
+    const token = instance.api_keys.shopify_access_token;
+    const domain = instance.store_domain;
 
     const url = `https://${domain}/admin/api/2025-01/products.json?limit=${limit}`;
 
@@ -137,24 +149,42 @@ server.registerTool(
     }),
   },
   async ({ variant_id, quantity = 1, discount_code }) => {
-    const domain = process.env.SHOPIFY_STORE_DOMAIN;
-
-    if (!domain) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "Missing SHOPIFY_STORE_DOMAIN environment variable.",
-          },
-        ],
-      };
-    }
-
+    const domain = instance.store_domain;
     let url = `https://${domain}/cart/${variant_id}:${quantity}`;
     if (discount_code) url += `?discount=${encodeURIComponent(discount_code)}`;
 
     return {
       content: [{ type: "text", text: url }],
+    };
+  }
+);
+
+server.registerTool(
+  "update_cart_context",
+  {
+    title: "Update Cart Context",
+    description:
+      "Update the live customer cart and/or profile for this session. Merges provided data into the existing dynamic context.",
+    inputSchema: z.object({
+      current_cart: z.record(z.string(), z.unknown()).optional().describe("Cart items to merge"),
+      customer_profile: z.record(z.string(), z.unknown()).optional().describe("Customer data to merge"),
+    }),
+  },
+  async ({ current_cart, customer_profile }) => {
+    if (current_cart) {
+      instance.dynamic_cart_context.current_cart = {
+        ...instance.dynamic_cart_context.current_cart,
+        ...current_cart,
+      };
+    }
+    if (customer_profile) {
+      instance.dynamic_cart_context.customer_profile = {
+        ...instance.dynamic_cart_context.customer_profile,
+        ...customer_profile,
+      };
+    }
+    return {
+      content: [{ type: "text", text: "Cart context updated." }],
     };
   }
 );
@@ -199,23 +229,12 @@ if (process.env.MODE === "DEV") {
       inputSchema: z.object({}),
     },
     async () => {
-      const token = process.env.SHOPIFY_ACCESS_TOKEN;
-      const domain = process.env.SHOPIFY_STORE_DOMAIN;
-
-      if (!token || !domain) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Missing SHOPIFY_ACCESS_TOKEN or SHOPIFY_STORE_DOMAIN.",
-            },
-          ],
-        };
-      }
+      const { shopify_access_token } = instance.api_keys;
+      const domain = instance.store_domain;
 
       const res = await fetch(
         `https://${domain}/admin/api/2025-01/shop.json`,
-        { headers: { "X-Shopify-Access-Token": token } }
+        { headers: { "X-Shopify-Access-Token": shopify_access_token } }
       );
 
       if (!res.ok) {
@@ -243,6 +262,18 @@ if (process.env.MODE === "DEV") {
       };
     }
   );
+
+  server.registerTool(
+    "get_client_instance",
+    {
+      title: "Get Client Instance",
+      description: "DEV: Returns the full current ClientInstance config for inspection.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [{ type: "text", text: JSON.stringify(instance, null, 2) }],
+    })
+  );
 }
 
 // --- Start ---
@@ -250,7 +281,7 @@ if (process.env.MODE === "DEV") {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("scalar-mcp running on stdio");
+  console.error(`scalar-mcp running | client:${instance.client_id} | mode:${process.env.MODE ?? "PRODUCTION"}`);
 }
 
 main().catch((err) => {
