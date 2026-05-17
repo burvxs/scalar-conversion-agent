@@ -5,11 +5,11 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "concurrently \"tsc --watch\" \"nodemon --watch dist --ext js --exec 'node --env-file=.env dist/client.js'\"",
+    "dev": "concurrently \"tsc --watch\" \"nodemon --watch dist/webhook.js --watch dist/lib --ext js --delay 1 --exec 'node --env-file=.env dist/webhook.js'\" \"nodemon --watch dist/client.js --watch dist/lib --ext js --delay 1 --exec 'node --env-file=.env dist/client.js'\"",
     "start": "node dist/index.js",
-    "client": "node dist/client.js",
+    "client": "node --env-file=.env dist/client.js",
     "webhook": "node --env-file=.env dist/webhook.js",
-    "dev:webhook": "nodemon --watch dist --ext js --exec 'node --env-file=.env dist/webhook.js'"
+    "dev:webhook": "nodemon --watch dist/webhook.js --watch dist/lib --ext js --delay 1 --exec 'node --env-file=.env dist/webhook.js'"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

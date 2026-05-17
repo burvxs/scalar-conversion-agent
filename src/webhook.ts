@@ -78,6 +78,12 @@ app.post("/webhooks/checkout", async (req, res) => {
 });
 
 const PORT = process.env.WEBHOOK_PORT ?? 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Webhook server listening on :${PORT} — POST /webhooks/checkout`);
 });
+
+function shutdown() {
+  server.close(() => process.exit(0));
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
