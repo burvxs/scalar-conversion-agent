@@ -23,7 +23,8 @@ export interface ClientInstance {
   client_id: string;
   store_domain: string;
   api_keys: {
-    shopify_access_token: string;
+    shopify_client_id: string;
+    shopify_client_secret: string;
   };
   billing_status: "active" | "trial" | "suspended";
   max_discount_percentage: number;

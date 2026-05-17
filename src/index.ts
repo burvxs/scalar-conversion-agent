@@ -5,6 +5,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
 import { loadClient } from "./lib/load-client.js";
+import { getShopifyToken } from "./lib/token-manager.js";
 import type { ClientInstance } from "./types/client-instance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +74,7 @@ server.registerTool(
     }),
   },
   async ({ limit = 10 }) => {
-    const token = instance.api_keys.shopify_access_token;
+    const token = await getShopifyToken(instance);
     const domain = instance.store_domain;
 
     const url = `https://${domain}/admin/api/2025-01/products.json?limit=${limit}`;
@@ -229,12 +230,12 @@ if (process.env.MODE === "DEV") {
       inputSchema: z.object({}),
     },
     async () => {
-      const { shopify_access_token } = instance.api_keys;
+      const token = await getShopifyToken(instance);
       const domain = instance.store_domain;
 
       const res = await fetch(
         `https://${domain}/admin/api/2025-01/shop.json`,
-        { headers: { "X-Shopify-Access-Token": shopify_access_token } }
+        { headers: { "X-Shopify-Access-Token": token } }
       );
 
       if (!res.ok) {

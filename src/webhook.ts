@@ -3,22 +3,25 @@ import { createHmac } from "node:crypto";
 import { writeFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadClient } from "./lib/load-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SESSIONS_DIR = resolve(__dirname, "../sessions");
 const SESSION_FILE = resolve(SESSIONS_DIR, "current-abandoned.json");
+
+const instance = await loadClient();
+const WEBHOOK_SECRET = instance.api_keys.shopify_client_secret;
 
 const app = express();
 
 app.use(express.raw({ type: "application/json" }));
 
 function validateHmac(rawBody: Buffer, signature: string): boolean {
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
-  if (!secret) {
-    console.warn("[webhook] SHOPIFY_WEBHOOK_SECRET not set — skipping HMAC validation");
+  if (!WEBHOOK_SECRET) {
+    console.warn("[webhook] No client secret — skipping HMAC validation");
     return true;
   }
-  const digest = createHmac("sha256", secret).update(rawBody).digest("base64");
+  const digest = createHmac("sha256", WEBHOOK_SECRET).update(rawBody).digest("base64");
   return digest === signature;
 }
 
