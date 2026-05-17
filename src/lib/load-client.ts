@@ -6,8 +6,8 @@ import type { ClientInstance } from "../types/client-instance.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export async function loadClient(): Promise<ClientInstance> {
-  const clientId = process.env.CLIENT_ID;
-  if (!clientId) throw new Error("CLIENT_ID environment variable is not set.");
+  const clientId = process.env.SCALAR_CLIENT_ID;
+  if (!clientId) throw new Error("SCALAR_CLIENT_ID environment variable is not set.");
 
   const path = resolve(__dirname, "../../clients", `${clientId}.json`);
 

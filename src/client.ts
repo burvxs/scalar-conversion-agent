@@ -2,12 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import * as readline from "node:readline/promises";
+import { readFile } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ClientInstance } from "./types/client-instance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER_PATH = resolve(__dirname, "../dist/index.js");
+const SESSION_FILE = resolve(__dirname, "../sessions/current-abandoned.json");
 
 function buildSystemPrompt(closer: string, instance: ClientInstance): string {
   const { persona, max_discount_percentage, offers, discount_code_prefix, dynamic_cart_context } = instance;
@@ -69,6 +71,29 @@ async function main() {
     console.error(`Client ${instance.client_id} is suspended. Exiting.`);
     await mcp.close();
     process.exit(1);
+  }
+
+  // Load abandoned checkout session if one exists
+  try {
+    const sessionRaw = await readFile(SESSION_FILE, "utf-8");
+    const session = JSON.parse(sessionRaw) as {
+      current_cart: Record<string, unknown>;
+      customer_profile: Record<string, unknown>;
+      received_at: string;
+    };
+    await mcp.callTool({
+      name: "update_cart_context",
+      arguments: {
+        current_cart: session.current_cart,
+        customer_profile: session.customer_profile,
+      },
+    });
+    const email = (session.customer_profile.email as string) ?? "unknown";
+    const items = (session.current_cart.line_items as unknown[])?.length ?? 0;
+    const total = session.current_cart.total_price ?? "?";
+    console.log(`\n[Abandoned checkout — ${email} | ${items} item(s) | £${total}]\n`);
+  } catch {
+    // No session file — fresh conversation
   }
 
   console.error(`Client: ${instance.client_id} | Status: ${instance.billing_status}`);
