@@ -25,7 +25,7 @@ function validateHmac(rawBody: Buffer, signature: string): boolean {
   return digest === signature;
 }
 
-app.post("/webhooks/checkout", async (req, res) => {
+app.post("/webhooks", async (req, res) => {
   const signature = req.headers["x-shopify-hmac-sha256"] as string ?? "";
   const rawBody = req.body as Buffer;
 
@@ -79,7 +79,7 @@ app.post("/webhooks/checkout", async (req, res) => {
 
 const PORT = process.env.WEBHOOK_PORT ?? 3000;
 const server = app.listen(PORT, () => {
-  console.log(`Webhook server listening on :${PORT} — POST /webhooks/checkout`);
+  console.log(`Webhook server listening on :${PORT} — POST /webhooks`);
 });
 
 function shutdown() {
